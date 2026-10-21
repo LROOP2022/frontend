@@ -12,7 +12,7 @@ jobs:
       packages: write
     uses: LROOP2022/actions/.github/workflows/docker-build-push.yml@v1
     with:
-      image: ghcr.io/lroop2022/web-site-frontend
+      image: ghcr.io/lroop2022/web
 
   deploy:
     permissions:
@@ -21,8 +21,8 @@ jobs:
     uses: LROOP2022/actions/.github/workflows/update-kustomize.yml@v1
     with:
       manifests_repo: LROOP2022/hack-manifests
-      manifests_path: web-site/frontend
-      service_name: frontend
+      manifests_path: team-frontend/web
+      service_name: web
       image_tag: sha-${{ github.sha }}
     secrets:
       K8S_REPO_TOKEN: ${{ secrets.K8S_REPO_TOKEN }}
