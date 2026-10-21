@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.gitignore
+.gitattributes
+.vscode
+.editorconfig
+.prettierrc.json
+.oxlintrc.json
+eslint.config.ts
+README.md
+Dockerfile
+.dockerignore
+*.log
+.env*
