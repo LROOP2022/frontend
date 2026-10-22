@@ -11,6 +11,19 @@ import {
 
 type Prediction = { index: string | number | null; probability: number }
 type CsvResponse = { predictions: Prediction[] }
+type Contribution = { feature: string; value: number; reference: number; delta: number }
+type Explanation = {
+  method: string
+  candidate_count: number
+  total_features: number
+  exact_match_adjustment: number
+  contributions: Contribution[]
+}
+type IdDetails = Prediction & {
+  features: Record<string, number>
+  word_count: string
+  explanation: Explanation
+}
 const API =
   import.meta.env.VITE_API_BASE_URL || 'https://api.team-backend.hack.week-infra.ru/api/v1/predict'
 const fields = [...Array.from({ length: 1367 }, (_, i) => `feature_${i}`), 'word_count']
@@ -30,8 +43,11 @@ const predictions = ref<Prediction[]>([])
 const selected = ref(0)
 const uploadedFile = ref<File | null>(null)
 const featureValues = ref<Record<string, string>>({})
+const sampleProfiles = ref<{ row: number; values: Record<string, string> }[]>([])
 const featureLoading = ref(false)
 const featureNotice = ref('')
+const explanation = ref<Explanation | null>(null)
+const explanationLoading = ref(false)
 const search = ref('')
 const showAll = ref(false)
 let previewRequest = 0
@@ -73,19 +89,46 @@ const histogram = computed(() => {
   const maximum = Math.max(...bins)
   return bins.map((count) => ({ count, height: `${Math.max(3, (count / maximum) * 100)}%` }))
 })
-const closest = computed(() =>
-  current.value
-    ? predictions.value
-        .map((item, row) => ({ ...item, row }))
-        .filter((item) => item.row !== selected.value)
-        .sort(
-          (a, b) =>
-            Math.abs(a.probability - current.value!.probability) -
-            Math.abs(b.probability - current.value!.probability),
-        )
-        .slice(0, 3)
-    : [],
+const closest = computed(() => {
+  if (!current.value || !Object.keys(featureValues.value).length || !sampleProfiles.value.length)
+    return []
+  const peers = sampleProfiles.value.filter((item) => item.row !== selected.value)
+  const columns = fields.filter((name) => name.startsWith('feature_'))
+  const scales = columns.map((name) => {
+    const values = [featureValues.value[name], ...peers.map((peer) => peer.values[name])]
+      .map(Number)
+      .filter(Number.isFinite)
+    return Math.max(1e-9, Math.max(...values) - Math.min(...values))
+  })
+  return peers
+    .map((peer) => {
+      let sum = 0
+      let used = 0
+      columns.forEach((name, i) => {
+        const a = Number(featureValues.value[name])
+        const b = Number(peer.values[name])
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return
+        const difference = (a - b) / (scales[i] ?? 1)
+        sum += difference * difference
+        used++
+      })
+      return {
+        index: predictions.value[peer.row]?.index ?? null,
+        probability: predictions.value[peer.row]?.probability ?? 0,
+        row: peer.row,
+        distance: Math.sqrt(sum / Math.max(1, used)),
+      }
+    })
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3)
+})
+const maxContribution = computed(() =>
+  Math.max(
+    0.000001,
+    ...(explanation.value?.contributions ?? []).map((item) => Math.abs(item.delta)),
+  ),
 )
+const point = (n: number) => `${n >= 0 ? '+' : '−'}${formatter.format(Math.abs(n * 100))} п.п.`
 
 function errorText(e: unknown): string {
   if (axios.isAxiosError(e)) {
@@ -99,17 +142,39 @@ function errorText(e: unknown): string {
 
 async function predictById() {
   if (objectId.value == null || loading.value) return
+  ++previewRequest
   attempted.value = true
   loading.value = true
   error.value = ''
   predictions.value = []
   selected.value = 0
   uploadedFile.value = null
+  sampleProfiles.value = []
   featureValues.value = {}
+  explanation.value = null
   featureNotice.value = 'По ID API возвращает оценку, но не исходные значения признаков.'
   try {
     const response = await axios.post<Prediction>(`${API}/by-id`, { index: String(objectId.value) })
     predictions.value = [response.data]
+    const requestedId = String(objectId.value)
+    explanationLoading.value = true
+    void axios
+      .post<IdDetails>(`${API}/by-id/details`, { index: requestedId })
+      .then(({ data }) => {
+        if (String(objectId.value) !== requestedId || uploadedFile.value) return
+        featureValues.value = Object.fromEntries(
+          Object.entries(data.features).map(([name, value]) => [name, String(value)]),
+        )
+        featureValues.value.word_count = data.word_count
+        explanation.value = data.explanation
+        featureNotice.value = 'Значения восстановлены из TEST.csv.'
+      })
+      .catch(() => {
+        featureNotice.value = 'Признаки по ID пока не загружены на сервер.'
+      })
+      .finally(() => {
+        explanationLoading.value = false
+      })
   } catch (e) {
     error.value = errorText(e)
   } finally {
@@ -194,13 +259,32 @@ async function readCsvRow(file: File, target: number): Promise<Record<string, st
 async function selectPrediction(index: number) {
   selected.value = index
   featureValues.value = {}
+  explanation.value = null
   featureNotice.value = ''
   if (!uploadedFile.value) return
   const request = ++previewRequest
   featureLoading.value = true
   try {
     const values = await readCsvRow(uploadedFile.value, index)
-    if (request === previewRequest) featureValues.value = values
+    if (request === previewRequest) {
+      featureValues.value = values
+      const record = Object.fromEntries(
+        Object.entries(values).map(([name, value]) => [
+          name,
+          name.startsWith('feature_') ? Number(value) : value,
+        ]),
+      )
+      explanationLoading.value = true
+      try {
+        const response = await axios.post<Explanation>(`${API}/explain`, { record })
+        if (request === previewRequest) explanation.value = response.data
+      } catch {
+        if (request === previewRequest)
+          featureNotice.value = 'График влияния признаков сейчас недоступен.'
+      } finally {
+        if (request === previewRequest) explanationLoading.value = false
+      }
+    }
   } catch {
     if (request === previewRequest)
       featureNotice.value = 'Не удалось показать значения этой строки CSV.'
@@ -212,13 +296,16 @@ async function selectPrediction(index: number) {
 async function uploadCsv(event: FileUploadSelectEvent) {
   const file = event.files?.[0]
   if (!file || loading.value) return
+  ++previewRequest
   attempted.value = true
   loading.value = true
   error.value = ''
   predictions.value = []
   selected.value = 0
   uploadedFile.value = file
+  sampleProfiles.value = []
   featureValues.value = {}
+  explanation.value = null
   featureNotice.value = ''
   const body = new FormData()
   body.append('file', file)
@@ -227,6 +314,17 @@ async function uploadCsv(event: FileUploadSelectEvent) {
     if (!response.data.predictions.length) throw new Error('Empty predictions')
     predictions.value = response.data.predictions
     void selectPrediction(0)
+    void (async () => {
+      const sample: { row: number; values: Record<string, string> }[] = []
+      for (let row = 0; row < Math.min(32, response.data.predictions.length); row++) {
+        try {
+          sample.push({ row, values: await readCsvRow(file, row) })
+        } catch {
+          break
+        }
+      }
+      if (uploadedFile.value === file) sampleProfiles.value = sample
+    })()
   } catch (e) {
     error.value = errorText(e)
   } finally {
@@ -427,11 +525,11 @@ async function uploadCsv(event: FileUploadSelectEvent) {
               </div>
             </article>
             <article class="cohort-card">
-              <small>ПОХОЖИЕ ОЦЕНКИ</small>
-              <h3>Ближайшие результаты</h3>
+              <small>СХОДСТВО ПРОФИЛЕЙ</small>
+              <h3>Похожие объекты</h3>
               <p>
-                Объекты из этого CSV с наиболее близкой вероятностью. Сходство исходных признаков
-                здесь не оценивается.
+                Сравниваем 1367 числовых признаков среди первых 32 строк этого CSV. Это сходство
+                профилей, а не подтверждённый исход банкротства.
               </p>
               <button
                 v-for="item in closest"
@@ -449,10 +547,71 @@ async function uploadCsv(event: FileUploadSelectEvent) {
           </div>
         </template>
       </section>
+      <section v-if="current && (explanation || explanationLoading)" class="section impact-section">
+        <div class="section-head">
+          <div>
+            <small>03 / ОБЪЯСНЕНИЕ</small>
+            <h2>Что меняет оценку модели</h2>
+          </div>
+          <p>Анализ признаков выбранного объекта</p>
+        </div>
+        <div v-if="explanationLoading && !explanation" class="state">
+          <ProgressSpinner style="width: 34px; height: 34px" />
+          <div>
+            <strong>Считаем влияние признаков</strong
+            ><span>Повторно запускаем модель для сравнения.</span>
+          </div>
+        </div>
+        <div v-else-if="explanation" class="impact-card">
+          <div class="impact-head">
+            <div>
+              <span class="impact-pill">АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ</span>
+              <h3>Главные факторы в прогнозе</h3>
+            </div>
+            <div class="impact-legend">
+              <span><i class="risk-dot"></i> повышает оценку</span
+              ><span><i class="safe-dot"></i> снижает оценку</span>
+            </div>
+          </div>
+          <div class="impact-list">
+            <div v-for="item in explanation.contributions" :key="item.feature" class="impact-row">
+              <div class="impact-label">
+                <strong>{{ item.feature }}</strong
+                ><span
+                  >Значение {{ formatter.format(item.value) }} · медиана
+                  {{ formatter.format(item.reference) }}</span
+                >
+              </div>
+              <div class="impact-track">
+                <i class="impact-center"></i
+                ><b
+                  :class="item.delta >= 0 ? 'risk-bar' : 'safe-bar'"
+                  :style="{
+                    width: `${Math.max(2, (Math.abs(item.delta) / maxContribution) * 48)}%`,
+                  }"
+                ></b>
+              </div>
+              <strong class="impact-value" :class="item.delta >= 0 ? 'risk-text' : 'safe-text'">{{
+                point(item.delta)
+              }}</strong>
+            </div>
+          </div>
+          <p class="impact-note">
+            Для каждого признака модель рассчитана повторно после замены его значения на медиану
+            обучения. Показана разница оценок в процентных пунктах. Это не SHAP: значения не
+            складываются в итоговый процент. Проверены 48 признаков с наибольшей важностью в
+            деревьях модели; показаны 16 сильнейших из них.
+          </p>
+          <p v-if="Math.abs(explanation.exact_match_adjustment) > 0.000001" class="impact-note">
+            Поправка за точное совпадение с обучающим профилем:
+            {{ point(explanation.exact_match_adjustment) }}. Она не распределена между признаками.
+          </p>
+        </div>
+      </section>
       <section class="section features-section">
         <div class="section-head">
           <div>
-            <small>03 / ДАННЫЕ</small>
+            <small>04 / ДАННЫЕ</small>
             <h2>Признаки модели</h2>
           </div>
           <p>1367 числовых полей и word_count</p>

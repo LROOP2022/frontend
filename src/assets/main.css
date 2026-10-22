@@ -728,6 +728,124 @@ h1 em {
   font-weight: 700;
   letter-spacing: 0.09em;
 }
+.impact-card {
+  padding: 30px;
+  border: 1px solid #dfe8ec;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 20px 48px rgba(19, 51, 64, 0.07);
+}
+.impact-head,
+.impact-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.impact-head {
+  margin-bottom: 22px;
+}
+.impact-head h3 {
+  margin: 10px 0 0;
+  font-size: 23px;
+}
+.impact-pill {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  color: #27817a;
+}
+.impact-legend {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  color: #73838b;
+  font-size: 12px;
+}
+.impact-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.impact-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.risk-dot,
+.risk-bar {
+  background: #e35a54;
+}
+.safe-dot,
+.safe-bar {
+  background: #19a37f;
+}
+.impact-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) minmax(120px, 1fr) 92px;
+  align-items: center;
+  gap: 20px;
+  padding: 13px 0;
+  border-top: 1px solid #edf1f3;
+}
+.impact-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.impact-label strong {
+  font-size: 13px;
+  color: #203844;
+}
+.impact-label span {
+  font-size: 11px;
+  color: #8a9aa3;
+  overflow-wrap: anywhere;
+}
+.impact-track {
+  position: relative;
+  height: 22px;
+  background: linear-gradient(90deg, #f7faf9 49.8%, #e2e9e8 50%, #f7faf9 50.2%);
+}
+.impact-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #c9d6d8;
+}
+.impact-track b {
+  position: absolute;
+  top: 6px;
+  height: 10px;
+  border-radius: 5px;
+}
+.impact-track .risk-bar {
+  left: 50%;
+  border-radius: 0 5px 5px 0;
+}
+.impact-track .safe-bar {
+  right: 50%;
+  border-radius: 5px 0 0 5px;
+}
+.impact-value {
+  text-align: right;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.risk-text {
+  color: #d64b47;
+}
+.safe-text {
+  color: #128b6b;
+}
+.impact-note {
+  margin: 14px 0 0;
+  color: #778a94;
+  font-size: 11px;
+  line-height: 1.6;
+}
 @media (max-width: 900px) {
   .hero {
     gap: 24px;
@@ -744,6 +862,26 @@ h1 em {
   }
 }
 @media (max-width: 680px) {
+  .impact-card {
+    padding: 20px;
+  }
+  .impact-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .impact-row {
+    grid-template-columns: minmax(0, 1fr) 84px;
+    gap: 7px 12px;
+  }
+  .impact-label {
+    grid-column: 1 / -1;
+  }
+  .impact-track {
+    grid-column: 1;
+  }
+  .impact-value {
+    grid-column: 2;
+  }
   .wrap {
     width: min(100% - 28px, 1180px);
   }
